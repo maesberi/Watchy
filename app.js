@@ -574,7 +574,7 @@ async function refreshEpisodes(){
     showToast('✅ Episodios actualizados');
     buildDetailUI();
   }catch(e){
-    showToast('❌ Error al actualizar');
+    showToast('❌ Error: ' + e.message);
   }
 }
 
