@@ -561,6 +561,7 @@ async function refreshEpisodes(){
     // Recargar temporadas una por una
     for(let s = 1; s <= item.numSeasons; s++){
       try{
+        await new Promise(r => setTimeout(r, 300)); // delay para no saturar TMDB
         const sr = await fetch(`${API}/tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
         if(!sr.ok) continue;
         const sd = await sr.json();
