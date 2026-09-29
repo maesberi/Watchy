@@ -549,26 +549,29 @@ async function refreshEpisodes(){
   const item = lib[detailId];
   if(!item || item.type !== 'series') return;
   const tmdbId = item.tmdbId;
-  showToast('🔄 Actualizando episodios...');
+  showToast('🔄 Actualizando...');
   try{
-    // Borrar caché de temporadas para forzar recarga
-    if(seaCache[tmdbId]) delete seaCache[tmdbId];
-    seaCache[tmdbId] = {};
-    // Recargar info general de la serie
-    const r = await fetch(`${API}tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
+    const r = await fetch(`${API}/tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
+    if(!r.ok) throw new Error('HTTP ' + r.status);
     const d = await r.json();
+    if(!d || !d.id) throw new Error('Sin datos de serie');
     item.numSeasons = d.number_of_seasons || item.numSeasons || 1;
-    // Recargar todas las temporadas
+    // Borrar caché de temporadas
+    seaCache[tmdbId] = {};
+    // Recargar temporadas una por una
     for(let s = 1; s <= item.numSeasons; s++){
       try{
-        const sr = await fetch(`${API}tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
+        const sr = await fetch(`${API}/tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
+        if(!sr.ok) continue;
         const sd = await sr.json();
-        seaCache[tmdbId][s] = (sd.episodes||[]).map(e=>({
-          episode_number: e.episode_number,
-          name: e.name,
-          air_date: e.air_date
-        }));
-      }catch(e){}
+        if(sd && sd.episodes){
+          seaCache[tmdbId][s] = sd.episodes.map(e=>({
+            episode_number: e.episode_number,
+            name: e.name,
+            air_date: e.air_date
+          }));
+        }
+      }catch(e){ continue; }
     }
     saveSea(); save();
     showToast('✅ Episodios actualizados');
