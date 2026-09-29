@@ -444,6 +444,7 @@ function buildDetailUI(){
       ${castSection}
       ${epSection}
       <button class="bsave" onclick="dSave()">Guardar y cerrar</button>
+      <button class="bupdate" onclick="refreshEpisodes()">🔄 Actualizar episodios</button>
       <button class="brem" onclick="dRemove()">Eliminar de mi lista</button>
     </div>`;
 }
@@ -543,6 +544,40 @@ function dSave(){ save(); closeDetail(); }
 function dRemove(){
   if(confirm('¿Eliminar de tu lista?')){ delete lib[detailId]; save(); closeDetail(); }
 }
+
+async function refreshEpisodes(){
+  const item = lib[detailId];
+  if(!item || item.type !== 'series') return;
+  const tmdbId = item.tmdbId;
+  showToast('🔄 Actualizando episodios...');
+  try{
+    // Borrar caché de temporadas para forzar recarga
+    if(seaCache[tmdbId]) delete seaCache[tmdbId];
+    seaCache[tmdbId] = {};
+    // Recargar info general de la serie
+    const r = await fetch(`${API}tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
+    const d = await r.json();
+    item.numSeasons = d.number_of_seasons || item.numSeasons || 1;
+    // Recargar todas las temporadas
+    for(let s = 1; s <= item.numSeasons; s++){
+      try{
+        const sr = await fetch(`${API}tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
+        const sd = await sr.json();
+        seaCache[tmdbId][s] = (sd.episodes||[]).map(e=>({
+          episode_number: e.episode_number,
+          name: e.name,
+          air_date: e.air_date
+        }));
+      }catch(e){}
+    }
+    saveSea(); save();
+    showToast('✅ Episodios actualizados');
+    buildDetailUI();
+  }catch(e){
+    showToast('❌ Error al actualizar');
+  }
+}
+
 function closeDetail(){
   document.getElementById('ov-detail').style.display = 'none';
   detailId = null; render();
@@ -762,9 +797,30 @@ async function exportJSON(){
   const json = JSON.stringify(backup, null, 2);
   const dateStr = new Date().toLocaleDateString('es-ES').replace(/\//g,'-');
   const fileName = `watchy-respaldo-${dateStr}.json`;
-  const blob = new Blob([json], {type:'application/json'});
 
-  // 1️⃣ Web Share API con archivo (funciona en Android APK y Chrome móvil)
+  // 1️⃣ Capacitor Filesystem (APK nativa)
+  if(window.Capacitor && window.Capacitor.isNativePlatform()){
+    const { Filesystem, Directory } = window.Capacitor.Plugins;
+    const base64 = btoa(unescape(encodeURIComponent(json)));
+    try{
+      await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.ExternalStorage, recursive: true });
+      showToast('✅ Respaldo en Descargas');
+      return;
+    }catch(e1){}
+    try{
+      await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Documents, recursive: true });
+      showToast('✅ Respaldo en Documentos');
+      return;
+    }catch(e2){}
+    try{
+      await Filesystem.writeFile({ path: fileName, data: base64, directory: Directory.Cache, recursive: true });
+      showToast('✅ Respaldo guardado (busca en Gestor → watchy)');
+      return;
+    }catch(e3){}
+  }
+
+  // 2️⃣ Web Share API (Chrome móvil)
+  const blob = new Blob([json], {type:'application/json'});
   if(navigator.canShare && navigator.canShare({files:[new File([blob], fileName, {type:'application/json'})]})){
     try{
       const file = new File([blob], fileName, {type:'application/json'});
@@ -772,11 +828,11 @@ async function exportJSON(){
       showToast('✅ Respaldo compartido');
       return;
     }catch(e){
-      if(e.name === 'AbortError') return; // usuario canceló
+      if(e.name === 'AbortError') return;
     }
   }
 
-  // 2️⃣ Descarga directa (Chrome escritorio y navegadores que no soportan share)
+  // 3️⃣ Descarga directa (navegador escritorio)
   try{
     const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(json);
     const a = document.createElement('a');
