@@ -311,8 +311,8 @@ function resHTML(item){
       <div class="rmeta">${year}${item.vote_average?` · ★${item.vote_average.toFixed(1)}`:''}</div>
     </div>
     <button class="radd ${inLib?'done':''}" id="radd-${k}"
-      onclick="addItem(${item.id},'${esc(title)}','${item.poster_path||''}','${year}',${item.vote_average||0},'${item.backdrop_path||''}','${esc(item.overview||'')}','${item.release_date||item.first_air_date||''}')">
-      ${inLib ? 'Añadido' : '+ Añadir'}
+      onclick="${inLib ? `closeSearch();openDetail('${k}')` : `addItem(${item.id},'${esc(title)}','${item.poster_path||''}','${year}',${item.vote_average||0},'${item.backdrop_path||''}','${esc(item.overview||'')}','${item.release_date||item.first_air_date||''}')`}">
+      ${inLib ? '👁 Ver detalle' : '+ Añadir'}
     </button>
   </div>`;
 }
