@@ -627,11 +627,9 @@ async function openActor(personId, name, photo, bio){
         photo: det.profile_path || photo,
         series: Object.values(seriesMap)
           .sort((a,b)=>(b.popularity||0)-(a.popularity||0))
-          .slice(0,40)
           .map(c=>({id:c.id,title:c.name||c.title||'?',poster:c.poster_path||null,year:(c.first_air_date||'').substring(0,4),vote:c.vote_average||0,overview:c.overview||'',backdrop:c.backdrop_path||null,releaseDate:c.first_air_date||''})),
         movies: Object.values(moviesMap)
           .sort((a,b)=>(b.popularity||0)-(a.popularity||0))
-          .slice(0,40)
           .map(c=>({id:c.id,title:c.title||c.name||'?',poster:c.poster_path||null,year:(c.release_date||'').substring(0,4),vote:c.vote_average||0,overview:c.overview||'',backdrop:c.backdrop_path||null,releaseDate:c.release_date||''}))
       };
       saveActor();
