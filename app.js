@@ -369,7 +369,7 @@ async function fetchCast(tmdbId, type){
   try{
     const r = await fetch(`${API}/${ep}/${tmdbId}/credits?api_key=${KEY}&language=es-ES`);
     const d = await r.json();
-    castCache[tmdbId] = (d.cast || []).slice(0, 15).map(c=>({
+    castCache[tmdbId] = (d.cast || []).map(c=>({
       id: c.id,
       name: c.name,
       character: c.character,
@@ -444,7 +444,7 @@ function buildDetailUI(){
       ${castSection}
       ${epSection}
       <button class="bsave" onclick="dSave()">Guardar y cerrar</button>
-      <button class="bupdate" onclick="refreshEpisodes()">🔄 Actualizar episodios</button>
+      <button class="bupdate" onclick="refreshSerie()">🔄 Actualizar serie</button>
       <button class="brem" onclick="dRemove()">Eliminar de mi lista</button>
     </div>`;
 }
@@ -545,37 +545,56 @@ function dRemove(){
   if(confirm('¿Eliminar de tu lista?')){ delete lib[detailId]; save(); closeDetail(); }
 }
 
-async function refreshEpisodes(){
+async function refreshSerie(){
   const item = lib[detailId];
-  if(!item || item.type !== 'series') return;
+  if(!item) return;
   const tmdbId = item.tmdbId;
+  const type = item.type;
   showToast('🔄 Actualizando...');
   try{
-    const r = await fetch(`${API}/tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
-    if(!r.ok) throw new Error('HTTP ' + r.status);
-    const d = await r.json();
-    if(!d || !d.id) throw new Error('Sin datos de serie');
-    item.numSeasons = d.number_of_seasons || item.numSeasons || 1;
-    // Borrar caché de temporadas
-    seaCache[tmdbId] = {};
-    // Recargar temporadas una por una
-    for(let s = 1; s <= item.numSeasons; s++){
-      try{
-        await new Promise(r => setTimeout(r, 300)); // delay para no saturar TMDB
-        const sr = await fetch(`${API}/tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
-        if(!sr.ok) continue;
-        const sd = await sr.json();
-        if(sd && sd.episodes){
-          seaCache[tmdbId][s] = sd.episodes.map(e=>({
-            episode_number: e.episode_number,
-            name: e.name,
-            air_date: e.air_date
-          }));
-        }
-      }catch(e){ continue; }
+    // Actualizar reparto
+    delete castCache[tmdbId];
+    const ep = type === 'series' ? 'tv' : 'movie';
+    const cr = await fetch(`${API}/${ep}/${tmdbId}/credits?api_key=${KEY}&language=es-ES`);
+    if(cr.ok){
+      const cd = await cr.json();
+      castCache[tmdbId] = (cd.cast || []).map(c=>({
+        id: c.id,
+        name: c.name,
+        character: c.character || c.known_for_department || '',
+        photo: c.profile_path || null
+      }));
+      saveCast();
     }
-    saveSea(); save();
-    showToast('✅ Episodios actualizados');
+
+    // Actualizar episodios (solo series)
+    if(type === 'series'){
+      const r = await fetch(`${API}/tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
+      if(!r.ok) throw new Error('HTTP ' + r.status);
+      const d = await r.json();
+      if(!d || !d.id) throw new Error('Sin datos de serie');
+      item.numSeasons = d.number_of_seasons || item.numSeasons || 1;
+      seaCache[tmdbId] = {};
+      for(let s = 1; s <= item.numSeasons; s++){
+        try{
+          await new Promise(r => setTimeout(r, 300));
+          const sr = await fetch(`${API}/tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
+          if(!sr.ok) continue;
+          const sd = await sr.json();
+          if(sd && sd.episodes){
+            seaCache[tmdbId][s] = sd.episodes.map(e=>({
+              episode_number: e.episode_number,
+              name: e.name,
+              air_date: e.air_date
+            }));
+          }
+        }catch(e){ continue; }
+      }
+      saveSea();
+    }
+
+    save();
+    showToast('✅ Serie actualizada');
     buildDetailUI();
   }catch(e){
     showToast('❌ Error: ' + e.message);
