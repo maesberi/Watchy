@@ -552,8 +552,9 @@ async function refreshSerie(){
   const type = item.type;
   showToast('🔄 Actualizando...');
   try{
-    // Actualizar reparto
+    // Actualizar reparto — borrar de memoria y localStorage
     delete castCache[tmdbId];
+    saveCast();
     const ep = type === 'series' ? 'tv' : 'movie';
     const cr = await fetch(`${API}/${ep}/${tmdbId}/credits?api_key=${KEY}&language=es-ES`);
     if(cr.ok){
@@ -910,3 +911,4 @@ async function initFetch(){
 
 render();
 initFetch();
+</script>
