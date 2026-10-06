@@ -911,4 +911,3 @@ async function initFetch(){
 
 render();
 initFetch();
-</script>
