@@ -3,20 +3,37 @@ const API = 'https://api.themoviedb.org/3';
 const IMG = 'https://image.tmdb.org/t/p/';
 const TODAY = new Date(); TODAY.setHours(0,0,0,0);
 
+/* ── HELPERS ── */
+function loadJSON(key, fallback = {}){
+  try{ return JSON.parse(localStorage.getItem(key)) ?? fallback; }
+  catch(e){ console.error('localStorage corrupto:', key, e); return fallback; }
+}
+function saveJSON(key, val){
+  try{ localStorage.setItem(key, JSON.stringify(val)); }
+  catch(e){ console.error('No se pudo guardar:', key, e); }
+}
+async function tmdb(path, extra = ''){
+  const r = await fetch(`${API}${path}?api_key=${KEY}&language=es-ES${extra}`);
+  if(!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+const mapEpisodes = (eps = []) => eps.map(({episode_number, name, air_date}) => ({episode_number, name, air_date}));
+const escHTML = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+
 // Estado global
 let mediaType = 'series';   // series | movies
 let statusView = 'watching'; // watching | watched
 let stype = 'series';
 let stimer = null;
-let lib = JSON.parse(localStorage.getItem('watchy_lib') || '{}');
-let seaCache = JSON.parse(localStorage.getItem('watchy_sea') || '{}');
-let castCache = JSON.parse(localStorage.getItem('watchy_cast') || '{}');
+let lib = loadJSON('watchy_lib');
+let seaCache = loadJSON('watchy_sea');
+let castCache = loadJSON('watchy_cast');
 let detailId = null, dSeason = 1;
 
-function saveCast(){ localStorage.setItem('watchy_cast', JSON.stringify(castCache)); }
+function saveCast(){ saveJSON('watchy_cast', castCache); }
 
-function save(){ localStorage.setItem('watchy_lib', JSON.stringify(lib)); }
-function saveSea(){ localStorage.setItem('watchy_sea', JSON.stringify(seaCache)); }
+function save(){ saveJSON('watchy_lib', lib); }
+function saveSea(){ saveJSON('watchy_sea', seaCache); }
 
 /* ── DATE HELPERS ── */
 function airStatus(ds){
@@ -57,14 +74,7 @@ function autoComplete(item){
 
 /* ── RENDER ── */
 function getNextAirDate(item){
-  if(!seaCache[item.tmdbId]) return null;
-  const seasons = Object.keys(seaCache[item.tmdbId]).map(Number).sort((a,b)=>a-b);
-  for(const s of seasons){
-    for(const ep of (seaCache[item.tmdbId][s]||[])){
-      if(!item.seasons?.[s]?.[ep.episode_number]) return ep.air_date || null;
-    }
-  }
-  return null;
+  return getNextEp(item)?.ep.air_date || null;
 }
 
 function getItems(){
@@ -107,6 +117,37 @@ function render(){
   el.innerHTML = `<div class="card-list">${list.map(i => mediaType === 'series' ? seriesCardHTML(i) : movieCardHTML(i)).join('')}</div>`;
 }
 
+/* ── EVENTOS (delegación): un solo oyente para casi todos los botones ── */
+const ACTIONS = {
+  detail: d => openDetail(d.id),
+  toggle: d => toggleWatched(d.id),
+  delete: d => delItem(d.id),
+  ep: d => quickEp(d.id, +d.season, +d.ep),
+  search: () => openSearch(),
+  backup: () => openBackup(),
+  type: d => switchType(d.value),
+  status: d => switchStatus(d.value),
+  stype: d => setSType(d.value),
+  'close-search': () => closeSearch(),
+  'close-backup': () => closeBackup(),
+  'close-detail': () => tryCloseDetail(),
+  'close-actor': () => closeActor(),
+  export: () => exportJSON(),
+  import: () => document.getElementById('import-input').click(),
+  'd-status': d => dSetStatus(d.value),
+  'd-refresh': () => refreshSerie(),
+  'd-remove': () => dRemove(),
+  'd-season': d => dSwitchSeason(+d.value),
+  'd-ep': d => dToggleEp(+d.season, +d.ep),
+  'd-markall': d => dMarkAll(+d.season, d.value === 'true')
+};
+document.addEventListener('click', e => {
+  const ov = e.target.dataset?.overlay;
+  if(ov){ ovClick(e, ov); return; }
+  const el = e.target.closest('[data-action]');
+  if(el) ACTIONS[el.dataset.action]?.(el.dataset);
+});
+
 /* ── SERIES CARD ── */
 function seriesCardHTML(item){
   const poster = item.poster
@@ -140,16 +181,16 @@ function seriesCardHTML(item){
 
   return `<div class="series-card">
     <div class="sc-top">
-      <div class="sc-poster" onclick="openDetail('${item.id}')">${poster}</div>
-      <div class="sc-mid" onclick="openDetail('${item.id}')">
+      <div class="sc-poster" data-action="detail" data-id="${item.id}">${poster}</div>
+      <div class="sc-mid" data-action="detail" data-id="${item.id}">
         <div class="sc-show">${esc(item.title)}</div>
         <div class="sc-epcode">${epCode}</div>
         <div class="sc-epname">${esc(epName)}</div>
         ${dateLabel ? `<div class="sc-date ${dateCls}">${dateCls==='future'?'🔮 ':''}${dateLabel}</div>` : ''}
       </div>
       <div class="sc-right">
-        <button class="check-btn ${isComplete?'checked':''}" onclick="toggleWatched('${item.id}')" title="${isComplete?'Marcar como viendo':'Marcar como vista'}">✓</button>
-        <button class="del-btn" onclick="delItem('${item.id}')">🗑</button>
+        <button class="check-btn ${isComplete?'checked':''}" data-action="toggle" data-id="${item.id}" title="${isComplete?'Marcar como viendo':'Marcar como vista'}">✓</button>
+        <button class="del-btn" data-action="delete" data-id="${item.id}">🗑</button>
       </div>
     </div>
     ${(progHTML || pillsHTML) ? `<div class="sc-bottom">${progHTML}${pillsHTML}</div>` : ''}
@@ -181,7 +222,7 @@ function buildEpPills(item){
         const airLabel = ep.air_date ? relDate(ep.air_date) : '';
         // Para futuros mostrar fecha, para pasados nada
         const showDate = as === 'future' && airLabel;
-        pills.push(`<div class="ep-pill ${cls}" onclick="event.stopPropagation();quickEp('${item.id}',${s},${ep.episode_number})" title="T${s}·E${ep.episode_number}: ${ep.name||''}">
+        pills.push(`<div class="ep-pill ${cls}" data-action="ep" data-id="${item.id}" data-season="${s}" data-ep="${ep.episode_number}" title="T${s}·E${ep.episode_number}: ${ep.name||''}">
           <span class="ep-pill-num">E${ep.episode_number}</span>
           ${showDate ? `<span class="ep-pill-air">${airLabel}</span>` : ''}
         </div>`);
@@ -216,15 +257,15 @@ function movieCardHTML(item){
   const releaseDate = item.releaseDate ? fmtDate(item.releaseDate) : (item.year || '');
 
   return `<div class="movie-card">
-    <div class="mc-poster" onclick="openDetail('${item.id}')">${poster}</div>
-    <div class="mc-info" onclick="openDetail('${item.id}')">
+    <div class="mc-poster" data-action="detail" data-id="${item.id}">${poster}</div>
+    <div class="mc-info" data-action="detail" data-id="${item.id}">
       <div class="mc-title">${esc(item.title)}</div>
       <div class="mc-meta">${vote}</div>
       ${releaseDate ? `<div class="mc-release">📅 ${releaseDate}</div>` : ''}
     </div>
     <div class="mc-right">
-      <button class="check-btn ${isWatched?'checked':''}" onclick="toggleWatched('${item.id}')" title="${isWatched?'Marcar como pendiente':'Marcar como vista'}">✓</button>
-      <button class="del-btn" onclick="delItem('${item.id}')">🗑</button>
+      <button class="check-btn ${isWatched?'checked':''}" data-action="toggle" data-id="${item.id}" title="${isWatched?'Marcar como pendiente':'Marcar como vista'}">✓</button>
+      <button class="del-btn" data-action="delete" data-id="${item.id}">🗑</button>
     </div>
   </div>`;
 }
@@ -290,11 +331,10 @@ async function doSearch(q){
   el.innerHTML = '<div class="loading"><div class="spinner"></div><br>Buscando…</div>';
   const ep = stype === 'series' ? 'tv' : 'movie';
   try{
-    const r = await fetch(`${API}/search/${ep}?api_key=${KEY}&query=${encodeURIComponent(q)}&language=es-ES`);
-    const d = await r.json();
-    if(!d.results?.length){ el.innerHTML=`<div class="nores">Sin resultados para "${q}"</div>`; return; }
+    const d = await tmdb(`/search/${ep}`, `&query=${encodeURIComponent(q)}`);
+    if(!d.results?.length){ el.innerHTML=`<div class="nores">Sin resultados para "${escHTML(q)}"</div>`; return; }
     el.innerHTML = d.results.slice(0,12).map(resHTML).join('');
-  }catch(e){ el.innerHTML='<div class="nores">Error de conexión</div>'; }
+  }catch(e){ console.error('doSearch:', e); el.innerHTML='<div class="nores">Error de conexión</div>'; }
 }
 function resHTML(item){
   const title = item.title || item.name || '?';
@@ -307,7 +347,7 @@ function resHTML(item){
   return `<div class="ritem">
     ${poster}
     <div class="rinfo">
-      <div class="rtitle">${title}</div>
+      <div class="rtitle">${escHTML(title)}</div>
       <div class="rmeta">${year}${item.vote_average?` · ★${item.vote_average.toFixed(1)}`:''}</div>
     </div>
     <button class="radd ${inLib?'done':''}" id="radd-${k}"
@@ -338,28 +378,22 @@ async function fetchAllSeasons(tmdbId, libKey){
   const item = lib[libKey];
   if(!item) return;
   try{
-    const r = await fetch(`${API}/tv/${tmdbId}?api_key=${KEY}&language=es-ES`);
-    const d = await r.json();
+    const d = await tmdb(`/tv/${tmdbId}`);
     item.numSeasons = d.number_of_seasons || 1;
     item.totalEps   = d.number_of_episodes || 0;
     save();
-    if(!seaCache[tmdbId]) seaCache[tmdbId] = {};
-    for(let s = 1; s <= item.numSeasons; s++){
-      if(!seaCache[tmdbId][s]){
-        try{
-          const sr = await fetch(`${API}/tv/${tmdbId}/season/${s}?api_key=${KEY}&language=es-ES`);
-          const sd = await sr.json();
-          seaCache[tmdbId][s] = (sd.episodes||[]).map(e=>({
-            episode_number: e.episode_number,
-            name: e.name,
-            air_date: e.air_date
-          }));
-          saveSea();
-        }catch(e){}
-      }
-    }
+    seaCache[tmdbId] ??= {};
+    const missing = Array.from({length: item.numSeasons}, (_, i) => i + 1)
+      .filter(s => !seaCache[tmdbId][s]);
+    await Promise.all(missing.map(async s => {
+      try{
+        const sd = await tmdb(`/tv/${tmdbId}/season/${s}`);
+        seaCache[tmdbId][s] = mapEpisodes(sd.episodes);
+      }catch(e){ console.error(`Temporada ${s} (${tmdbId}):`, e); }
+    }));
+    saveSea();
     render();
-  }catch(e){}
+  }catch(e){ console.error('fetchAllSeasons:', e); }
 }
 
 /* ── CAST ── */
@@ -367,16 +401,12 @@ async function fetchCast(tmdbId, type){
   if(castCache[tmdbId]) return;
   const ep = type === 'series' ? 'tv' : 'movie';
   try{
-    const r = await fetch(`${API}/${ep}/${tmdbId}/credits?api_key=${KEY}&language=es-ES`);
-    const d = await r.json();
-    castCache[tmdbId] = (d.cast || []).map(c=>({
-      id: c.id,
-      name: c.name,
-      character: c.character,
-      photo: c.profile_path || null
+    const d = await tmdb(`/${ep}/${tmdbId}/credits`);
+    castCache[tmdbId] = (d.cast || []).map(c => ({
+      id: c.id, name: c.name, character: c.character, photo: c.profile_path || null
     }));
     saveCast();
-  }catch(e){}
+  }catch(e){ console.error('fetchCast:', e); }
 }
 
 /* ── DETAIL ── */
@@ -384,6 +414,7 @@ async function openDetail(id){
   detailId = id;
   const item = lib[id];
   if(!item) return;
+  detailSnap = JSON.stringify(item);
   dSeason = item.currentSeason || 1;
   buildDetailUI();
   document.getElementById('ov-detail').style.display = 'flex';
@@ -418,7 +449,7 @@ function buildDetailUI(){
     ? [{k:'watching',e:'▶️',l:'Viendo'},{k:'watched',e:'✅',l:'Completa'}]
     : [{k:'watching',e:'⏳',l:'Pendiente'},{k:'watched',e:'✅',l:'Vista'}];
   const stRow = opts.map(o=>`
-    <div class="d-st-btn ${item.status===o.k?'sel-'+o.k:''}" onclick="dSetStatus('${o.k}')">
+    <div class="d-st-btn ${item.status===o.k?'sel-'+o.k:''}" data-action="d-status" data-value="${o.k}">
       <span>${o.e}</span><span>${o.l}</span>
     </div>`).join('');
 
@@ -428,7 +459,7 @@ function buildDetailUI(){
   document.getElementById('dsheet-content').innerHTML = `
     <div style="position:relative;flex-shrink:0">
       ${back}
-      <button class="dclose" onclick="closeDetail()">✕</button>
+      <button class="dclose" data-action="close-detail">✕</button>
     </div>
     <div class="dbody">
       <div class="dtop">
@@ -443,9 +474,8 @@ function buildDetailUI(){
       <div class="d-status-row" id="d-strow">${stRow}</div>
       ${castSection}
       ${epSection}
-      <button class="bsave" onclick="dSave()">Guardar y cerrar</button>
-      <button class="bupdate" onclick="refreshSerie()">🔄 Actualizar serie</button>
-      <button class="brem" onclick="dRemove()">Eliminar de mi lista</button>
+      <button class="bupdate" data-action="d-refresh">🔄 Actualizar serie</button>
+      <button class="brem" data-action="d-remove">Eliminar de mi lista</button>
     </div>`;
 }
 
@@ -474,7 +504,7 @@ function buildEpSection(item){
   if(!seasons.includes(dSeason)) dSeason = seasons[0];
 
   const tabs = seasons.map(s =>
-    `<div class="sea-tab ${s===dSeason?'active':''}" onclick="dSwitchSeason(${s})">T${s}</div>`
+    `<div class="sea-tab ${s===dSeason?'active':''}" data-action="d-season" data-value="${s}">T${s}</div>`
   ).join('');
 
   const eps = sd[dSeason] || [];
@@ -494,14 +524,14 @@ function buildEpSection(item){
         ${dateStr ? `<div class="ep-air ${fut?'fut':''}">${dateStr}</div>` : ''}
       </div>
       <button class="ep-check ${seen?'done':''}"
-        ${fut ? 'style="opacity:0.3;cursor:default" title="Aún no ha salido"' : `onclick="dToggleEp(${dSeason},${ep.episode_number})"`}>✓</button>
+        ${fut ? 'style="opacity:0.3;cursor:default" title="Aún no ha salido"' : `data-action="d-ep" data-season="${dSeason}" data-ep="${ep.episode_number}"`}>✓</button>
     </div>`;
   }).join('');
 
   return `
     <div class="dsec">Episodios · T${dSeason} &mdash; ${seenCount}/${eps.length} vistos</div>
     <div class="sea-tabs">${tabs}</div>
-    <button class="markall" onclick="dMarkAll(${dSeason},${!allSeen})">
+    <button class="markall" data-action="d-markall" data-season="${dSeason}" data-value="${!allSeen}">
       ${allSeen ? '✕ Desmarcar todos' : '✅ Marcar todos como vistos'}
     </button>
     <div class="ep-list">${rows}</div>`;
@@ -540,7 +570,19 @@ function dSetStatus(s){
   save(); buildDetailUI();
 }
 
-function dSave(){ save(); closeDetail(); }
+let detailSnap = null; // copia del título al abrir el detalle
+function tryCloseDetail(){
+  const item = lib[detailId];
+  if(item && detailSnap && JSON.stringify(item) !== detailSnap){
+    if(confirm('¿Guardar los cambios?\n\nAceptar = guardar\nCancelar = descartar')){
+      save();
+    } else {
+      lib[detailId] = JSON.parse(detailSnap);
+      save();
+    }
+  }
+  closeDetail();
+}
 function dRemove(){
   if(confirm('¿Eliminar de tu lista?')){ delete lib[detailId]; save(); closeDetail(); }
 }
@@ -556,9 +598,8 @@ async function refreshSerie(){
     delete castCache[tmdbId];
     saveCast();
     const ep = type === 'series' ? 'tv' : 'movie';
-    const cr = await fetch(`${API}/${ep}/${tmdbId}/credits?api_key=${KEY}&language=es-ES`);
-    if(cr.ok){
-      const cd = await cr.json();
+    {
+      const cd = await tmdb(`/${ep}/${tmdbId}/credits`);
       castCache[tmdbId] = (cd.cast || []).map(c=>({
         id: c.id,
         name: c.name,
@@ -608,10 +649,10 @@ function closeDetail(){
 }
 
 /* ── ACTOR ── */
-let actorCache = JSON.parse(localStorage.getItem('watchy_actor') || '{}'); // {personId: {bio, series:[], movies:[]}}
+let actorCache = loadJSON('watchy_actor'); // {personId: {bio, series:[], movies:[]}}
 let actorFilmTab = 'series'; // tab activo en filmografía
 
-function saveActor(){ localStorage.setItem('watchy_actor', JSON.stringify(actorCache)); }
+function saveActor(){ saveJSON('watchy_actor', actorCache); }
 
 async function openActor(personId, name, photo, bio){
   // Mostrar sheet inmediatamente con lo que tengamos
@@ -654,7 +695,7 @@ async function openActor(personId, name, photo, bio){
       };
       saveActor();
       renderActorSheet(personId, name, actorCache[personId].photo, actorCache[personId].bio);
-    }catch(e){}
+    }catch(e){ console.error("openActor:", e); }
   }
 }
 
@@ -679,7 +720,7 @@ function renderActorSheet(personId, name, photo, bio){
         <div class="actor-name">${esc(name)}</div>
         ${bioHTML}
       </div>
-      <button class="actor-close" onclick="closeActor()">✕</button>
+      <button class="actor-close" data-action="close-actor">✕</button>
     </div>
     <div class="actor-tabs">
       <div class="actor-tab ${actorFilmTab==='series'?'active':''}" onclick="switchActorTab('${personId}','${esc(name)}','${photo}','${esc(bioText)}','series')">
@@ -767,7 +808,7 @@ function ovClick(e, id){
     if(id === 'ov-search') closeSearch();
     else if(id === 'ov-backup') closeBackup();
     else if(id === 'ov-actor') closeActor();
-    else closeDetail();
+    else tryCloseDetail();
   }
 }
 
