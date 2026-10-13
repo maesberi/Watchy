@@ -139,7 +139,29 @@ const ACTIONS = {
   'd-remove': () => dRemove(),
   'd-season': d => dSwitchSeason(+d.value),
   'd-ep': d => dToggleEp(+d.season, +d.ep),
-  'd-markall': d => dMarkAll(+d.season, d.value === 'true')
+  'd-markall': d => dMarkAll(+d.season, d.value === 'true'),
+  'open-lib': d => { closeSearch(); openDetail(d.id); },
+  'add-result': d => {
+    const it = searchResults[d.id];
+    if(!it) return;
+    const date = it.release_date || it.first_air_date || '';
+    addItem(it.id, it.title || it.name || '?', it.poster_path || '', date.substring(0,4),
+            it.vote_average || 0, it.backdrop_path || '', it.overview || '', date);
+  },
+  actor: d => {
+    const c = castCache[lib[detailId]?.tmdbId]?.find(x => String(x.id) === d.id);
+    if(c) openActor(c.id, c.name, c.photo || '', c.biography || '');
+  },
+  'actor-tab': d => {
+    const a = currentActor;
+    if(a) switchActorTab(a.personId, a.name, a.photo, a.bio, d.value);
+  },
+  'add-film': d => {
+    const list = actorCache[currentActor?.personId]?.[d.type === 'series' ? 'series' : 'movies'];
+    const it = list?.find(x => String(x.id) === d.id);
+    if(it) addFromActor(d.type, it.id, it.title, it.poster || '', it.year, it.vote,
+                        it.backdrop || '', it.overview || '', it.releaseDate || '');
+  }
 };
 document.addEventListener('click', e => {
   const ov = e.target.dataset?.overlay;
@@ -326,6 +348,7 @@ function onSInput(){
   if(q.length < 2){ document.getElementById('rlist').innerHTML='<div style="text-align:center;padding:32px;color:var(--text3);font-size:13px;">Escribe para buscar</div>'; return; }
   stimer = setTimeout(() => doSearch(q), 380);
 }
+const searchResults = {}; // resultados de la última búsqueda, por clave
 async function doSearch(q){
   const el = document.getElementById('rlist');
   el.innerHTML = '<div class="loading"><div class="spinner"></div><br>Buscando…</div>';
@@ -333,7 +356,9 @@ async function doSearch(q){
   try{
     const d = await tmdb(`/search/${ep}`, `&query=${encodeURIComponent(q)}`);
     if(!d.results?.length){ el.innerHTML=`<div class="nores">Sin resultados para "${escHTML(q)}"</div>`; return; }
-    el.innerHTML = d.results.slice(0,12).map(resHTML).join('');
+    const shown = d.results.slice(0,12);
+    shown.forEach(it => { searchResults[`${stype}-${it.id}`] = it; });
+    el.innerHTML = shown.map(resHTML).join('');
   }catch(e){ console.error('doSearch:', e); el.innerHTML='<div class="nores">Error de conexión</div>'; }
 }
 function resHTML(item){
@@ -351,7 +376,7 @@ function resHTML(item){
       <div class="rmeta">${year}${item.vote_average?` · ★${item.vote_average.toFixed(1)}`:''}</div>
     </div>
     <button class="radd ${inLib?'done':''}" id="radd-${k}"
-      onclick="${inLib ? `closeSearch();openDetail('${k}')` : `addItem(${item.id},'${esc(title)}','${item.poster_path||''}','${year}',${item.vote_average||0},'${item.backdrop_path||''}','${esc(item.overview||'')}','${item.release_date||item.first_air_date||''}')`}">
+      data-action="${inLib ? 'open-lib' : 'add-result'}" data-id="${k}">
       ${inLib ? '👁 Ver detalle' : '+ Añadir'}
     </button>
   </div>`;
@@ -487,7 +512,7 @@ function buildCastSection(tmdbId){
     const photo = c.photo
       ? `<img class="cast-photo" src="${IMG}w185${c.photo}" alt="" loading="lazy">`
       : `<div class="cast-photo-ph">👤</div>`;
-    return `<div class="cast-card" onclick="openActor(${c.id},'${esc(c.name)}','${c.photo||''}','${esc(c.biography||'')}')">
+    return `<div class="cast-card" data-action="actor" data-id="${c.id}">
       ${photo}
       <div class="cast-name">${esc(c.name)}</div>
       ${c.character ? `<div class="cast-char">${esc(c.character)}</div>` : ''}
@@ -651,6 +676,7 @@ function closeDetail(){
 /* ── ACTOR ── */
 let actorCache = loadJSON('watchy_actor'); // {personId: {bio, series:[], movies:[]}}
 let actorFilmTab = 'series'; // tab activo en filmografía
+let currentActor = null;     // actor que se está mostrando
 
 function saveActor(){ saveJSON('watchy_actor', actorCache); }
 
@@ -705,6 +731,7 @@ function renderActorSheet(personId, name, photo, bio){
     ? `<img class="actor-photo-big" src="${IMG}w185${photo}" alt="">`
     : `<div class="actor-photo-big-ph">👤</div>`;
   const bioText = (data?.bio || bio || '').trim();
+  currentActor = { personId, name, photo, bio: bioText };
   const bioHTML = bioText ? `<div class="actor-bio">${esc(bioText)}</div>` : `<div class="actor-bio" style="color:var(--text3);font-style:italic">Sin biografía disponible</div>`;
 
   const seriesCount = data?.series?.length || 0;
@@ -723,10 +750,10 @@ function renderActorSheet(personId, name, photo, bio){
       <button class="actor-close" data-action="close-actor">✕</button>
     </div>
     <div class="actor-tabs">
-      <div class="actor-tab ${actorFilmTab==='series'?'active':''}" onclick="switchActorTab('${personId}','${esc(name)}','${photo}','${esc(bioText)}','series')">
+      <div class="actor-tab ${actorFilmTab==='series'?'active':''}" data-action="actor-tab" data-value="series">
         📺 Series ${seriesCount>0?`(${seriesCount})`:''}
       </div>
-      <div class="actor-tab ${actorFilmTab==='movies'?'active':''}" onclick="switchActorTab('${personId}','${esc(name)}','${photo}','${esc(bioText)}','movies')">
+      <div class="actor-tab ${actorFilmTab==='movies'?'active':''}" data-action="actor-tab" data-value="movies">
         🎬 Películas ${moviesCount>0?`(${moviesCount})`:''}
       </div>
     </div>
@@ -754,8 +781,8 @@ function buildFilmogGrid(personId){
     const badge = inLib ? `<div class="fg-badge">✓</div>` : '';
     const addBtn = inLib
       ? `<div class="fg-add-btn"><span class="fg-add done">✓ Añadido</span></div>`
-      : `<div class="fg-add-btn"><button class="fg-add" onclick="event.stopPropagation();addFromActor('${type}',${item.id},'${esc(item.title)}','${item.poster||''}','${item.year}',${item.vote},'${item.backdrop||''}','${esc(item.overview||'')}','${item.releaseDate||''}')">+ Añadir</button></div>`;
-    return `<div class="fg-card ${inLib?'in-lib':''}" onclick="addFromActor('${type}',${item.id},'${esc(item.title)}','${item.poster||''}','${item.year}',${item.vote},'${item.backdrop||''}','${esc(item.overview||'')}','${item.releaseDate||''}')">
+      : `<div class="fg-add-btn"><button class="fg-add" data-action="add-film" data-type="${type}" data-id="${item.id}">+ Añadir</button></div>`;
+    return `<div class="fg-card ${inLib?'in-lib':''}" data-action="add-film" data-type="${type}" data-id="${item.id}">
       ${poster}
       ${badge}
       ${addBtn}
