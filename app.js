@@ -55,7 +55,6 @@ function relDate(ds){
   if(diff < 0 && diff > -8) return `Hace ${-diff} días`;
   return fmtDate(ds);
 }
-function esc(s){ return String(s).replace(/\\/g,'\\\\').replace(/'/g,"\\'").replace(/"/g,'&quot;').replace(/\n/g,' '); }
 
 /* ── COUNTS ── */
 function countSeen(item){
@@ -205,9 +204,9 @@ function seriesCardHTML(item){
     <div class="sc-top">
       <div class="sc-poster" data-action="detail" data-id="${item.id}">${poster}</div>
       <div class="sc-mid" data-action="detail" data-id="${item.id}">
-        <div class="sc-show">${esc(item.title)}</div>
+        <div class="sc-show">${escHTML(item.title)}</div>
         <div class="sc-epcode">${epCode}</div>
-        <div class="sc-epname">${esc(epName)}</div>
+        <div class="sc-epname">${escHTML(epName)}</div>
         ${dateLabel ? `<div class="sc-date ${dateCls}">${dateCls==='future'?'🔮 ':''}${dateLabel}</div>` : ''}
       </div>
       <div class="sc-right">
@@ -281,7 +280,7 @@ function movieCardHTML(item){
   return `<div class="movie-card">
     <div class="mc-poster" data-action="detail" data-id="${item.id}">${poster}</div>
     <div class="mc-info" data-action="detail" data-id="${item.id}">
-      <div class="mc-title">${esc(item.title)}</div>
+      <div class="mc-title">${escHTML(item.title)}</div>
       <div class="mc-meta">${vote}</div>
       ${releaseDate ? `<div class="mc-release">📅 ${releaseDate}</div>` : ''}
     </div>
@@ -467,16 +466,20 @@ function buildDetailUI(){
   const vote = item.vote ? `★${item.vote.toFixed(1)}` : '';
   const releaseLabel = item.releaseDate ? ` · 📅 ${fmtDate(item.releaseDate)}` : (item.year ? ` · ${item.year}` : '');
   const meta = [item.type==='series'?'Serie':'Película', vote].filter(Boolean).join(' · ') + releaseLabel;
-  const ov = item.overview ? `<p class="dov">${item.overview}</p>` : '';
+  const ov = item.overview ? `<p class="dov">${escHTML(item.overview)}</p>` : '';
 
   // 2 status buttons
   const opts = item.type === 'series'
     ? [{k:'watching',e:'▶️',l:'Viendo'},{k:'watched',e:'✅',l:'Completa'}]
     : [{k:'watching',e:'⏳',l:'Pendiente'},{k:'watched',e:'✅',l:'Vista'}];
-  const stRow = opts.map(o=>`
+  const stBtn = o => `
     <div class="d-st-btn ${item.status===o.k?'sel-'+o.k:''}" data-action="d-status" data-value="${o.k}">
       <span>${o.e}</span><span>${o.l}</span>
-    </div>`).join('');
+    </div>`;
+  const stRow = stBtn(opts[0])
+    + `<div class="d-st-btn act-upd" data-action="d-refresh"><span>🔄</span><span>Actualizar</span></div>`
+    + stBtn(opts[1])
+    + `<div class="d-st-btn act-del" data-action="d-remove"><span>🗑️</span><span>Eliminar</span></div>`;
 
   const epSection = item.type === 'series' ? buildEpSection(item) : '';
   const castSection = buildCastSection(item.tmdbId);
@@ -490,7 +493,7 @@ function buildDetailUI(){
       <div class="dtop">
         ${p}
         <div class="dhead">
-          <div class="dtitle">${esc(item.title)}</div>
+          <div class="dtitle">${escHTML(item.title)}</div>
           <div class="dmeta">${meta}</div>
         </div>
       </div>
@@ -499,8 +502,6 @@ function buildDetailUI(){
       <div class="d-status-row" id="d-strow">${stRow}</div>
       ${castSection}
       ${epSection}
-      <button class="bupdate" data-action="d-refresh">🔄 Actualizar serie</button>
-      <button class="brem" data-action="d-remove">Eliminar de mi lista</button>
     </div>`;
 }
 
@@ -514,8 +515,8 @@ function buildCastSection(tmdbId){
       : `<div class="cast-photo-ph">👤</div>`;
     return `<div class="cast-card" data-action="actor" data-id="${c.id}">
       ${photo}
-      <div class="cast-name">${esc(c.name)}</div>
-      ${c.character ? `<div class="cast-char">${esc(c.character)}</div>` : ''}
+      <div class="cast-name">${escHTML(c.name)}</div>
+      ${c.character ? `<div class="cast-char">${escHTML(c.character)}</div>` : ''}
     </div>`;
   }).join('');
   return `<div class="dsec">Reparto</div><div class="cast-row">${cards}</div>`;
@@ -545,7 +546,7 @@ function buildEpSection(item){
     return `<div class="ep-row ${seen?'ep-r-seen':''} ${fut?'ep-r-future':''}">
       <div class="ep-num">E${ep.episode_number}</div>
       <div class="ep-info">
-        <div class="ep-title">${esc(ep.name || 'Episodio '+ep.episode_number)}</div>
+        <div class="ep-title">${escHTML(ep.name || 'Episodio '+ep.episode_number)}</div>
         ${dateStr ? `<div class="ep-air ${fut?'fut':''}">${dateStr}</div>` : ''}
       </div>
       <button class="ep-check ${seen?'done':''}"
@@ -732,7 +733,7 @@ function renderActorSheet(personId, name, photo, bio){
     : `<div class="actor-photo-big-ph">👤</div>`;
   const bioText = (data?.bio || bio || '').trim();
   currentActor = { personId, name, photo, bio: bioText };
-  const bioHTML = bioText ? `<div class="actor-bio">${esc(bioText)}</div>` : `<div class="actor-bio" style="color:var(--text3);font-style:italic">Sin biografía disponible</div>`;
+  const bioHTML = bioText ? `<div class="actor-bio">${escHTML(bioText)}</div>` : `<div class="actor-bio" style="color:var(--text3);font-style:italic">Sin biografía disponible</div>`;
 
   const seriesCount = data?.series?.length || 0;
   const moviesCount = data?.movies?.length || 0;
@@ -744,7 +745,7 @@ function renderActorSheet(personId, name, photo, bio){
     <div class="actor-header">
       ${photoEl}
       <div class="actor-info">
-        <div class="actor-name">${esc(name)}</div>
+        <div class="actor-name">${escHTML(name)}</div>
         ${bioHTML}
       </div>
       <button class="actor-close" data-action="close-actor">✕</button>
@@ -787,7 +788,7 @@ function buildFilmogGrid(personId){
       ${badge}
       ${addBtn}
       <div class="fg-info">
-        <div class="fg-title">${esc(item.title)}</div>
+        <div class="fg-title">${escHTML(item.title)}</div>
         ${item.year ? `<div class="fg-year">${item.year}${item.vote>0?` · ★${item.vote.toFixed(1)}`:''}</div>` : ''}
       </div>
     </div>`;
