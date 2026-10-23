@@ -477,7 +477,7 @@ function buildDetailUI(){
       <span>${o.e}</span><span>${o.l}</span>
     </div>`;
   const stRow = stBtn(opts[0])
-    + `<div class="d-st-btn act-upd" data-action="d-refresh"><span>🔄</span><span>Actualizar</span></div>`
+    + (item.type === 'series' ? `<div class="d-st-btn act-upd" data-action="d-refresh"><span>🔄</span><span>Actualizar</span></div>` : '')
     + stBtn(opts[1])
     + `<div class="d-st-btn act-del" data-action="d-remove"><span>🗑️</span><span>Eliminar</span></div>`;
 
